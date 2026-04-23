@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+@theme {
+  --color-cream: #f3eee2;
+  --color-sage-light: #d8e4d2;
+  --color-sage-deep: #5b7c68;
+  --font-display: "Pretendard", "Noto Sans KR", sans-serif;
+}
+
+@layer base {
+  body {
+    background-color: #faf7f2;
+    color: #292524;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+}

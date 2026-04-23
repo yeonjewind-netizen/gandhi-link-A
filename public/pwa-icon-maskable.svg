@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="maskableBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#89AB96" />
+      <stop offset="100%" stop-color="#5B7C68" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="#5B7C68" />
+  <circle cx="256" cy="256" r="152" fill="url(#maskableBg)" />
+  <path
+    d="M256 160c44 0 80 36 80 80s-36 80-80 80c-5 0-11 0-16-2v48h-30v-58c0-8 6-14 14-14h18c30 0 54-24 54-54s-24-54-54-54-54 24-54 54h-30c0-44 36-80 80-80z"
+    fill="#F8FBF7"
+  />
+  <circle cx="256" cy="240" r="8" fill="#F8FBF7" />
+</svg>
