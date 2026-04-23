@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { subDays } from "date-fns";
-import PlannerPage from "../planner";
+import PlannerPage from "../PlannerPage";
 import { setDailyBonusForDate, setDailyEpForDate, updateDailyRoutines, updateShared, useGandhiStore } from "../hooks/useGandhiStore";
 import { HOME_STORAGE_KEY, ROUTINE_EP_EACH } from "./constants";
 import {
