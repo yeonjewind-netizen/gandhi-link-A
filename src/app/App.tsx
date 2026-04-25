@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
-import { subDays } from "date-fns";
-import PlannerPage from "../PlannerPage"; 
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { differenceInCalendarDays, subDays } from "date-fns";
+import PlannerPage from "../PlannerPage";
 import { setDailyBonusForDate, setDailyEpForDate, updateDailyRoutines, updateShared, useGandhiStore } from "../hooks/useGandhiStore";
 import { HOME_STORAGE_KEY, ROUTINE_EP_EACH } from "./constants";
 import {
@@ -12,6 +12,54 @@ import {
 } from "./domain";
 import { HomeTab } from "./HomeTab";
 import type { BigGoal, DailyRoutine } from "./types";
+
+const STREAK_COUNT_KEY = "streakCount";
+const LAST_COMPLETED_DATE_KEY = "lastCompletedDate";
+
+type StreakState = {
+  count: number;
+  lastCompletedDate: string;
+};
+
+const CELEBRATION_SPARKS = [
+  { left: "12%", top: "18%", delay: "0ms" },
+  { left: "24%", top: "30%", delay: "120ms" },
+  { left: "40%", top: "16%", delay: "220ms" },
+  { left: "58%", top: "28%", delay: "80ms" },
+  { left: "73%", top: "17%", delay: "180ms" },
+  { left: "86%", top: "34%", delay: "280ms" },
+] as const;
+
+function parseDateKey(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function isContinuingStreak(lastCompletedDate: string, todayKey: string) {
+  if (!lastCompletedDate) return false;
+  const dayGap = differenceInCalendarDays(parseDateKey(todayKey), parseDateKey(lastCompletedDate));
+  return dayGap === 0 || dayGap === 1;
+}
+
+function readStreakState(todayKey: string): StreakState {
+  if (typeof window === "undefined") return { count: 0, lastCompletedDate: "" };
+  const storedCount = localStorage.getItem(STREAK_COUNT_KEY);
+  const storedDate = localStorage.getItem(LAST_COMPLETED_DATE_KEY);
+  const count = Math.max(0, Number(storedCount ?? 0) || 0);
+  const lastCompletedDate = storedDate ?? "";
+  const next = {
+    count: isContinuingStreak(lastCompletedDate, todayKey) ? count : 0,
+    lastCompletedDate: isContinuingStreak(lastCompletedDate, todayKey) ? lastCompletedDate : "",
+  };
+  localStorage.setItem(STREAK_COUNT_KEY, String(next.count));
+  localStorage.setItem(LAST_COMPLETED_DATE_KEY, next.lastCompletedDate);
+  return next;
+}
+
+function writeStreakState(next: StreakState) {
+  localStorage.setItem(STREAK_COUNT_KEY, String(next.count));
+  localStorage.setItem(LAST_COMPLETED_DATE_KEY, next.lastCompletedDate);
+}
 
 export default function App() {
   const todayKey = getDateKey();
@@ -27,6 +75,11 @@ export default function App() {
     }
   });
   const [showDayCloseModal, setShowDayCloseModal] = useState(false);
+  const [streak, setStreak] = useState<StreakState>(() => readStreakState(todayKey));
+  const [showGrowthCelebration, setShowGrowthCelebration] = useState(false);
+  const [celebrationStreakCount, setCelebrationStreakCount] = useState(streak.count);
+  const isAwardingStreakRef = useRef(false);
+  const completedTodayRef = useRef(streak.lastCompletedDate === todayKey);
 
   useEffect(() => {
     localStorage.setItem(HOME_STORAGE_KEY, JSON.stringify({ activeTab }));
@@ -39,18 +92,21 @@ export default function App() {
     [dailyRoutines]
   );
   const totalDailyEp = useMemo(() => big3Ep + routineEpTotal, [big3Ep, routineEpTotal]);
-  const growthEnergyPercent = useMemo(() => {
+  const subtaskStats = useMemo(() => {
     const totalSubtasks = big3.reduce(
       (sum, goal) => sum + goal.subTasks.filter((task) => task.text.trim().length > 0).length,
       0
     );
-    if (totalSubtasks <= 0) return 0;
     const doneSubtasks = big3.reduce(
       (sum, goal) => sum + goal.subTasks.filter((task) => task.text.trim().length > 0 && task.isDone).length,
       0
     );
-    return Math.round((doneSubtasks / totalSubtasks) * 100);
+    return { done: doneSubtasks, total: totalSubtasks };
   }, [big3]);
+  const growthEnergyPercent = useMemo(() => {
+    if (subtaskStats.total <= 0) return 0;
+    return Math.round((subtaskStats.done / subtaskStats.total) * 100);
+  }, [subtaskStats]);
 
   useEffect(() => {
     setDailyEpForDate(todayKey, totalDailyEp);
@@ -65,6 +121,10 @@ export default function App() {
   );
 
   const hasGrowthTasks = useMemo(() => big3.some((g) => g.subTasks.length > 0), [big3]);
+  const isStreakActive = useMemo(
+    () => streak.count > 0 && isContinuingStreak(streak.lastCompletedDate, todayKey),
+    [streak, todayKey]
+  );
   const recentGrowthLog = useMemo(() => {
     return Array.from({ length: 7 }, (_, index) => {
       const date = subDays(new Date(), 6 - index);
@@ -109,9 +169,64 @@ export default function App() {
     updateDailyRoutines((prev) => (typeof next === "function" ? next(prev) : next));
   }, []);
 
+  const awardStreakForToday = useCallback(() => {
+    if (typeof window === "undefined") return null;
+    const latest = readStreakState(todayKey);
+    if (latest.lastCompletedDate === todayKey) {
+      completedTodayRef.current = true;
+      return null;
+    }
+
+    const wasYesterday = latest.lastCompletedDate
+      ? differenceInCalendarDays(parseDateKey(todayKey), parseDateKey(latest.lastCompletedDate)) === 1
+      : false;
+    const nextStreak = {
+      count: wasYesterday ? latest.count + 1 : 1,
+      lastCompletedDate: todayKey,
+    };
+    writeStreakState(nextStreak);
+    completedTodayRef.current = true;
+    return nextStreak;
+  }, [todayKey]);
+
+  useEffect(() => {
+    const hasCompletedEverySubtask = subtaskStats.total > 0 && subtaskStats.done === subtaskStats.total;
+    if (!hasCompletedEverySubtask) return;
+    if (completedTodayRef.current) return;
+    if (isAwardingStreakRef.current) return;
+
+    const nextStreak = awardStreakForToday();
+    if (!nextStreak) return;
+    isAwardingStreakRef.current = true;
+    const timer = window.setTimeout(() => {
+      setStreak(nextStreak);
+      setCelebrationStreakCount(nextStreak.count);
+      setShowGrowthCelebration(true);
+      isAwardingStreakRef.current = false;
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [awardStreakForToday, subtaskStats.done, subtaskStats.total]);
+
   return (
     <div className="min-h-dvh bg-[#FAF7F2] pb-28">
       <div className="mx-auto flex min-h-dvh max-w-md flex-col px-6 pt-10 pb-8 sm:px-8 sm:pt-12">
+        <header className="sticky top-3 z-40 mb-5 flex items-center justify-between rounded-3xl border border-sage-light/70 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
+          <div>
+            <p className="text-xs font-medium text-stone-500">Gandhi Link</p>
+            <p className="text-sm font-semibold text-stone-800">오늘도 작은 한 걸음</p>
+          </div>
+          <div
+            className={`flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold transition ${
+              isStreakActive ? "bg-orange-100 text-orange-600 shadow-sm" : "bg-stone-100 text-stone-400"
+            }`}
+            aria-label={`현재 연속 달성일 ${streak.count}일`}
+          >
+            <span className={`text-lg ${isStreakActive ? "drop-shadow-sm" : "grayscale"}`} aria-hidden>
+              🔥
+            </span>
+            <span>{streak.count}</span>
+          </div>
+        </header>
         {activeTab === "home" ? (
           <HomeTab
             totalDailyEp={totalDailyEp}
@@ -156,6 +271,36 @@ export default function App() {
           ))}
         </div>
       </nav>
+
+      {showGrowthCelebration && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-sage-deep/45 px-6 backdrop-blur-sm">
+          <div className="relative w-full max-w-sm overflow-hidden rounded-[2rem] border border-sage-light/80 bg-[#FAF7F2] p-7 text-center shadow-2xl">
+            {CELEBRATION_SPARKS.map((spark, index) => (
+              <span
+                key={`${spark.left}-${index}`}
+                className="celebration-spark absolute h-3 w-3 rounded-full bg-orange-300"
+                style={{ left: spark.left, top: spark.top, animationDelay: spark.delay }}
+              />
+            ))}
+            <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-gradient-to-br from-orange-100 to-sage-light text-4xl shadow-inner">
+              🎉
+            </div>
+            <p className="text-sm font-semibold text-sage-deep">100% 성장 에너지 달성</p>
+            <h2 className="mt-2 text-2xl font-bold text-stone-800">축하합니다! 오늘도 성장했어요!</h2>
+            <div className="streak-pop mx-auto mt-5 inline-flex items-center gap-2 rounded-2xl bg-orange-100 px-5 py-3 text-lg font-bold text-orange-600">
+              <span aria-hidden>🔥</span>
+              <span>{celebrationStreakCount}일 연속 성장</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowGrowthCelebration(false)}
+              className="mt-6 w-full rounded-2xl bg-sage-deep py-3 text-sm font-semibold text-white transition hover:bg-sage-deep/90"
+            >
+              계속 성장하기
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
