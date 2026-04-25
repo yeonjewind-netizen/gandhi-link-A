@@ -3,6 +3,7 @@ import { differenceInCalendarDays, subDays } from "date-fns";
 import PlannerPage from "../PlannerPage";
 import { setDailyBonusForDate, setDailyEpForDate, updateDailyRoutines, updateShared, useGandhiStore } from "../hooks/useGandhiStore";
 import { HOME_STORAGE_KEY, ROUTINE_EP_EACH } from "./constants";
+import { ForestTab } from "./ForestTab";
 import {
   computeBig3DailyEp,
   countBonusGoalsToday,
@@ -15,6 +16,9 @@ import type { BigGoal, DailyRoutine } from "./types";
 
 const STREAK_COUNT_KEY = "streakCount";
 const LAST_COMPLETED_DATE_KEY = "lastCompletedDate";
+const TOTAL_POINTS_KEY = "totalPoints";
+const NOTIFICATION_ENABLED_KEY = "isNotificationEnabled";
+const POINTS_PER_COMPLETED_SUBTASK = 100;
 
 type StreakState = {
   count: number;
@@ -61,21 +65,50 @@ function writeStreakState(next: StreakState) {
   localStorage.setItem(LAST_COMPLETED_DATE_KEY, next.lastCompletedDate);
 }
 
+function readTotalPoints() {
+  if (typeof window === "undefined") return 0;
+  return Math.max(0, Number(localStorage.getItem(TOTAL_POINTS_KEY) ?? 0) || 0);
+}
+
+function writeTotalPoints(nextTotalPoints: number) {
+  localStorage.setItem(TOTAL_POINTS_KEY, String(Math.max(0, nextTotalPoints)));
+}
+
+function readNotificationEnabled() {
+  if (typeof window === "undefined" || !("Notification" in window)) return false;
+  return localStorage.getItem(NOTIFICATION_ENABLED_KEY) === "true" && Notification.permission === "granted";
+}
+
+function countCompletedSubtasks(goals: BigGoal[]) {
+  return goals.reduce(
+    (sum, goal) => sum + goal.subTasks.filter((task) => task.text.trim().length > 0 && task.isDone).length,
+    0
+  );
+}
+
 export default function App() {
   const todayKey = getDateKey();
   const { shared, dailyRoutines, dailyEpMap } = useGandhiStore();
-  const [activeTab, setActiveTab] = useState<"home" | "planner">(() => {
+  const [activeTab, setActiveTab] = useState<"home" | "planner" | "forest">(() => {
     if (typeof window === "undefined") return "home";
     try {
       const raw = localStorage.getItem(HOME_STORAGE_KEY);
       if (!raw) return "home";
-      return JSON.parse(raw).activeTab === "planner" ? "planner" : "home";
+      const savedTab = JSON.parse(raw).activeTab;
+      return savedTab === "planner" || savedTab === "forest" ? savedTab : "home";
     } catch {
       return "home";
     }
   });
   const [showDayCloseModal, setShowDayCloseModal] = useState(false);
   const [streak, setStreak] = useState<StreakState>(() => readStreakState(todayKey));
+  const [totalPoints, setTotalPoints] = useState(() => readTotalPoints());
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isNotificationEnabled, setIsNotificationEnabled] = useState(() => readNotificationEnabled());
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) return "default";
+    return Notification.permission;
+  });
   const [showGrowthCelebration, setShowGrowthCelebration] = useState(false);
   const [celebrationStreakCount, setCelebrationStreakCount] = useState(streak.count);
   const isAwardingStreakRef = useRef(false);
@@ -84,6 +117,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(HOME_STORAGE_KEY, JSON.stringify({ activeTab }));
   }, [activeTab]);
+
+  useEffect(() => {
+    localStorage.setItem(NOTIFICATION_ENABLED_KEY, String(isNotificationEnabled));
+  }, [isNotificationEnabled]);
 
   const big3 = normalizeBig3(shared.byDate[todayKey]?.big3);
   const big3Ep = useMemo(() => computeBig3DailyEp(big3), [big3]);
@@ -140,9 +177,18 @@ export default function App() {
   }, [shared]);
 
   function setTodayBig3(nextBig3: BigGoal[]) {
+    const normalizedNextBig3 = normalizeBig3(nextBig3);
+    const completedDelta = countCompletedSubtasks(normalizedNextBig3) - countCompletedSubtasks(big3);
+    if (completedDelta > 0) {
+      setTotalPoints((prev) => {
+        const nextTotalPoints = prev + completedDelta * POINTS_PER_COMPLETED_SUBTASK;
+        writeTotalPoints(nextTotalPoints);
+        return nextTotalPoints;
+      });
+    }
     updateShared((prev) => ({
         ...prev,
-        byDate: { ...prev.byDate, [todayKey]: { big3: normalizeBig3(nextBig3) } },
+        byDate: { ...prev.byDate, [todayKey]: { big3: normalizedNextBig3 } },
       }));
   }
 
@@ -167,6 +213,37 @@ export default function App() {
 
   const setDailyRoutinesState: Dispatch<SetStateAction<DailyRoutine[]>> = useCallback((next) => {
     updateDailyRoutines((prev) => (typeof next === "function" ? next(prev) : next));
+  }, []);
+
+  const requestNotificationPermission = useCallback(async () => {
+    if (typeof window === "undefined" || !("Notification" in window)) {
+      setIsNotificationEnabled(false);
+      return;
+    }
+    const permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+    setIsNotificationEnabled(permission === "granted");
+  }, []);
+
+  const sendTestNotification = useCallback(async () => {
+    if (typeof window === "undefined" || !("Notification" in window) || Notification.permission !== "granted") return;
+    const title = "🌳 간디 링크";
+    const body = "오늘 하루도 잘 채워볼까요?";
+
+    if ("serviceWorker" in navigator) {
+      const registration = await navigator.serviceWorker.ready;
+      await registration.showNotification(title, {
+        body,
+        icon: "/pwa-icon.svg",
+        badge: "/pwa-icon-maskable.svg",
+      });
+      return;
+    }
+
+    new Notification(title, {
+      body,
+      icon: "/pwa-icon.svg",
+    });
   }, []);
 
   const awardStreakForToday = useCallback(() => {
@@ -215,16 +292,26 @@ export default function App() {
             <p className="text-xs font-medium text-stone-500">Gandhi Link</p>
             <p className="text-sm font-semibold text-stone-800">오늘도 작은 한 걸음</p>
           </div>
-          <div
-            className={`flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold transition ${
-              isStreakActive ? "bg-orange-100 text-orange-600 shadow-sm" : "bg-stone-100 text-stone-400"
-            }`}
-            aria-label={`현재 연속 달성일 ${streak.count}일`}
-          >
-            <span className={`text-lg ${isStreakActive ? "drop-shadow-sm" : "grayscale"}`} aria-hidden>
-              🔥
-            </span>
-            <span>{streak.count}</span>
+          <div className="flex items-center gap-2">
+            <div
+              className={`flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold transition ${
+                isStreakActive ? "bg-orange-100 text-orange-600 shadow-sm" : "bg-stone-100 text-stone-400"
+              }`}
+              aria-label={`현재 연속 달성일 ${streak.count}일`}
+            >
+              <span className={`text-lg ${isStreakActive ? "drop-shadow-sm" : "grayscale"}`} aria-hidden>
+                🔥
+              </span>
+              <span>{streak.count}</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsSettingsOpen(true)}
+              className="rounded-2xl bg-stone-100 px-3 py-2 text-lg text-stone-500 transition hover:bg-sage-light/60 hover:text-sage-deep"
+              aria-label="설정 열기"
+            >
+              ⚙️
+            </button>
           </div>
         </header>
         {activeTab === "home" ? (
@@ -244,8 +331,10 @@ export default function App() {
             hasGrowthTasks={hasGrowthTasks}
             recentGrowthLog={recentGrowthLog}
           />
-        ) : (
+        ) : activeTab === "planner" ? (
           <PlannerPage />
+        ) : (
+          <ForestTab growthEnergyPercent={growthEnergyPercent} streakCount={streak.count} totalPoints={totalPoints} />
         )}
       </div>
 
@@ -254,6 +343,7 @@ export default function App() {
           {[
             { icon: "⌂", label: "Home", value: "home" as const },
             { icon: "▦", label: "Planner", value: "planner" as const },
+            { icon: "🌳", label: "Forest", value: "forest" as const },
           ].map((item) => (
             <button
               key={item.label}
@@ -271,6 +361,62 @@ export default function App() {
           ))}
         </div>
       </nav>
+
+      {isSettingsOpen && (
+        <div className="fixed inset-0 z-[70] flex items-end justify-center bg-stone-900/35 p-6 backdrop-blur-sm sm:items-center">
+          <div className="w-full max-w-md rounded-3xl border border-sage-light/70 bg-[#FAF7F2] p-6 shadow-2xl">
+            <div className="mb-5 flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-sage-deep">Settings</p>
+                <h2 className="mt-1 text-xl font-bold text-stone-800">알림 설정</h2>
+                <p className="mt-2 text-sm leading-relaxed text-stone-600">
+                  앱 방문을 잊지 않도록 브라우저 시스템 알림을 켤 수 있어요.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen(false)}
+                className="rounded-full bg-white px-3 py-1.5 text-sm text-stone-500 ring-1 ring-stone-200"
+              >
+                닫기
+              </button>
+            </div>
+
+            {!("Notification" in window) ? (
+              <p className="rounded-2xl bg-stone-100 px-4 py-3 text-sm text-stone-500">
+                이 브라우저는 Web Notification API를 지원하지 않아요.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                <button
+                  type="button"
+                  onClick={() => void requestNotificationPermission()}
+                  className={`w-full rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+                    isNotificationEnabled
+                      ? "bg-sage-deep text-white"
+                      : "bg-white text-sage-deep ring-1 ring-sage-light hover:bg-sage-light/40"
+                  }`}
+                >
+                  {isNotificationEnabled ? "🔔 알림 켜짐" : "🔔 푸시 알림 켜기"}
+                </button>
+
+                <button
+                  type="button"
+                  disabled={!isNotificationEnabled || notificationPermission !== "granted"}
+                  onClick={() => void sendTestNotification()}
+                  className="w-full rounded-2xl bg-orange-100 px-4 py-3 text-sm font-semibold text-orange-700 transition enabled:hover:bg-orange-200 disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  테스트 알림 보내기
+                </button>
+
+                <p className="text-center text-xs text-stone-500">
+                  현재 권한 상태: <span className="font-semibold text-stone-700">{notificationPermission}</span>
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {showGrowthCelebration && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-sage-deep/45 px-6 backdrop-blur-sm">
