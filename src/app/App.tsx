@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { differenceInCalendarDays, subDays } from "date-fns";
 import PlannerPage from "../PlannerPage";
+import { GANDHI_GOALS_KEY, SHARED_STORAGE_KEY } from "../constants";
 import { setDailyBonusForDate, setDailyEpForDate, updateDailyRoutines, updateShared, useGandhiStore } from "../hooks/useGandhiStore";
 import { HOME_STORAGE_KEY, ROUTINE_EP_EACH } from "./constants";
 import { ForestTab } from "./ForestTab";
@@ -18,6 +19,7 @@ const STREAK_COUNT_KEY = "streakCount";
 const LAST_COMPLETED_DATE_KEY = "lastCompletedDate";
 const TOTAL_POINTS_KEY = "totalPoints";
 const NOTIFICATION_ENABLED_KEY = "isNotificationEnabled";
+const LAST_SMART_REMINDER_MINUTE_KEY = "lastSmartReminderMinute";
 const POINTS_PER_COMPLETED_SUBTASK = 100;
 
 type StreakState = {
@@ -77,6 +79,24 @@ function writeTotalPoints(nextTotalPoints: number) {
 function readNotificationEnabled() {
   if (typeof window === "undefined" || !("Notification" in window)) return false;
   return localStorage.getItem(NOTIFICATION_ENABLED_KEY) === "true" && Notification.permission === "granted";
+}
+
+function readIncompleteSubtaskTextsFromStorage(todayDateKey: string) {
+  if (typeof window === "undefined") return [] as string[];
+  const sharedRaw = localStorage.getItem(GANDHI_GOALS_KEY) ?? localStorage.getItem(SHARED_STORAGE_KEY);
+  if (!sharedRaw) return [] as string[];
+
+  try {
+    const parsed = JSON.parse(sharedRaw) as { byDate?: Record<string, { big3?: BigGoal[] }> };
+    const todayBig3 = normalizeBig3(parsed?.byDate?.[todayDateKey]?.big3);
+    return todayBig3.flatMap((goal) =>
+      goal.subTasks
+        .filter((task) => task.text.trim().length > 0 && !task.isDone)
+        .map((task) => task.text.trim())
+    );
+  } catch {
+    return [] as string[];
+  }
 }
 
 function countCompletedSubtasks(goals: BigGoal[]) {
@@ -225,10 +245,8 @@ export default function App() {
     setIsNotificationEnabled(permission === "granted");
   }, []);
 
-  const sendTestNotification = useCallback(async () => {
+  const sendNotification = useCallback(async (title: string, body: string) => {
     if (typeof window === "undefined" || !("Notification" in window) || Notification.permission !== "granted") return;
-    const title = "🌳 간디 링크";
-    const body = "오늘 하루도 잘 채워볼까요?";
 
     if ("serviceWorker" in navigator) {
       const registration = await navigator.serviceWorker.ready;
@@ -245,6 +263,54 @@ export default function App() {
       icon: "/pwa-icon.svg",
     });
   }, []);
+
+  const sendTestNotification = useCallback(async () => {
+    await sendNotification("🌳 간디 링크", "오늘 하루도 잘 채워볼까요?");
+  }, [sendNotification]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const scheduledReminderTimes = ["13:00", "18:00", "21:00"];
+    const checkAndSendSmartReminder = () => {
+      if (!isNotificationEnabled) return;
+      if (!("Notification" in window) || Notification.permission !== "granted") return;
+
+      const now = new Date();
+      const currentTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+      const currentMinuteKey = `${getDateKey(now)}-${currentTime}`;
+      if (localStorage.getItem(LAST_SMART_REMINDER_MINUTE_KEY) === currentMinuteKey) return;
+      localStorage.setItem(LAST_SMART_REMINDER_MINUTE_KEY, currentMinuteKey);
+
+      // TODO: 실제 배포 시에는 특정 시간(예: 1시간 간격)에만 울리도록 수정
+      const shouldNotifyNow = true || scheduledReminderTimes.includes(currentTime);
+      if (!shouldNotifyNow) return;
+
+      const incompleteSubtaskTexts = readIncompleteSubtaskTextsFromStorage(getDateKey(now));
+      if (incompleteSubtaskTexts.length === 0) return;
+
+      const randomIncompleteSubtask =
+        incompleteSubtaskTexts[Math.floor(Math.random() * incompleteSubtaskTexts.length)];
+      const smartMessages = [
+        "오늘 미션이 아직 남아 있어요!",
+        "아직 못 한 미션이 남아 있어요!",
+        `BIG3 목표를 달성하기 위해 [${randomIncompleteSubtask}]를 달성해보세요!`,
+      ];
+      const selectedMessage = smartMessages[Math.floor(Math.random() * smartMessages.length)];
+
+      void sendNotification("🌳 간디 링크", selectedMessage)
+        .then(() => {
+          setNotificationPermission(Notification.permission);
+        })
+        .catch(() => {
+          // no-op
+        });
+    };
+
+    checkAndSendSmartReminder();
+    const intervalId = window.setInterval(checkAndSendSmartReminder, 60_000);
+    return () => window.clearInterval(intervalId);
+  }, [isNotificationEnabled, sendNotification]);
 
   const awardStreakForToday = useCallback(() => {
     if (typeof window === "undefined") return null;
@@ -390,14 +456,20 @@ export default function App() {
               <div className="space-y-3">
                 <button
                   type="button"
-                  onClick={() => void requestNotificationPermission()}
+                  onClick={() => {
+                    if (isNotificationEnabled) {
+                      setIsNotificationEnabled(false);
+                      return;
+                    }
+                    void requestNotificationPermission();
+                  }}
                   className={`w-full rounded-2xl px-4 py-3 text-sm font-semibold transition ${
                     isNotificationEnabled
                       ? "bg-sage-deep text-white"
                       : "bg-white text-sage-deep ring-1 ring-sage-light hover:bg-sage-light/40"
                   }`}
                 >
-                  {isNotificationEnabled ? "🔔 알림 켜짐" : "🔔 푸시 알림 켜기"}
+                  {isNotificationEnabled ? "🔕 푸시 알림 끄기" : "🔔 푸시 알림 켜기"}
                 </button>
 
                 <button
