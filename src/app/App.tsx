@@ -293,6 +293,11 @@ export default function App() {
     () => streak.count > 0 && isContinuingStreak(streak.lastCompletedDate, todayKey),
     [streak, todayKey]
   );
+  const greetingName = useMemo(() => {
+    const baseName = (user?.displayName ?? "").trim();
+    if (!baseName) return "오늘의 러너";
+    return baseName.split(" ")[0];
+  }, [user]);
   const recentGrowthLog = useMemo(() => {
     return Array.from({ length: 7 }, (_, index) => {
       const date = subDays(new Date(), 6 - index);
@@ -501,47 +506,71 @@ export default function App() {
   return (
     <div className="min-h-dvh bg-[#FAF7F2] pb-28">
       <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col px-4 pt-8 pb-8 sm:px-5 sm:pt-10">
-        <header className="sticky top-2 z-40 mb-5 flex items-center justify-between rounded-[24px] bg-white/90 px-4 py-3 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.45)] backdrop-blur-xl">
-          <div>
-            <p className="text-xs font-medium text-stone-500">Gandhi Link</p>
-            <p className="text-sm font-semibold text-stone-800">오늘도 작은 한 걸음</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <div
-              className={`flex items-center gap-2 rounded-2xl px-3 py-2 text-sm font-semibold transition ${
-                isStreakActive ? "bg-orange-100 text-orange-600 shadow-sm" : "bg-stone-100 text-stone-400"
-              }`}
-              aria-label={`현재 연속 달성일 ${streak.count}일`}
-            >
-              <span className={`text-lg ${isStreakActive ? "drop-shadow-sm" : "grayscale"}`} aria-hidden>
-                🔥
-              </span>
-              <span>{streak.count}</span>
+        <header className="sticky top-2 z-40 mb-5 overflow-hidden rounded-[32px] bg-gradient-to-br from-[#ecf8ef] via-[#f7fcf8] to-white px-5 py-4 shadow-[0_26px_55px_-30px_rgba(22,101,52,0.45)] backdrop-blur-xl">
+          <div
+            className="pointer-events-none absolute -right-8 -top-10 h-40 w-40 rounded-full bg-emerald-200/35 blur-3xl"
+            aria-hidden
+          />
+          <div
+            className="pointer-events-none absolute -left-10 -bottom-14 h-44 w-44 rounded-full bg-lime-200/25 blur-3xl"
+            aria-hidden
+          />
+          <div className="relative flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-white/85 text-xl shadow-[0_8px_20px_-14px_rgba(16,185,129,0.55)]"
+                  aria-hidden
+                >
+                  👓🌱
+                </span>
+                <p className="text-lg font-extrabold tracking-tight text-stone-800">Gandhi Link</p>
+              </div>
+              <p className="mt-3 text-base font-semibold leading-snug text-sage-deep">
+                {greetingName}님, 오늘도 한 걸음 떼볼까요? 🌱
+              </p>
             </div>
-            <button
-              type="button"
-              onClick={() => setIsSettingsOpen(true)}
-              className="rounded-full bg-stone-100 px-3 py-2 text-lg text-stone-500 transition duration-200 active:scale-95 hover:bg-sage-light/60 hover:text-sage-deep"
-              aria-label="설정 열기"
-            >
-              ⚙️
-            </button>
+            <div className="flex items-center gap-2">
+              <div
+                className={`flex h-10 min-w-10 items-center justify-center gap-1 rounded-full px-3 text-sm font-bold transition ${
+                  isStreakActive
+                    ? "bg-orange-100/95 text-orange-600 shadow-[0_10px_20px_-14px_rgba(251,146,60,0.65)]"
+                    : "bg-stone-100 text-stone-400"
+                }`}
+                aria-label={`현재 연속 달성일 ${streak.count}일`}
+              >
+                <span className={`${isStreakActive ? "" : "grayscale"}`} aria-hidden>
+                  🔥
+                </span>
+                <span>{streak.count}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen(true)}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-lg text-stone-500 shadow-[0_10px_20px_-16px_rgba(15,23,42,0.45)] transition duration-200 active:scale-95 hover:text-sage-deep"
+                aria-label="설정 열기"
+              >
+                ⚙️
+              </button>
+            </div>
+          </div>
+          <div className="relative mt-3 flex items-center justify-end gap-2">
             {user.photoURL ? (
               <img
                 src={user.photoURL}
                 alt="프로필"
-                className="h-9 w-9 rounded-full border border-stone-200 object-cover"
+                className="h-8 w-8 rounded-full border border-white/80 object-cover shadow-[0_10px_18px_-14px_rgba(15,23,42,0.55)]"
                 referrerPolicy="no-referrer"
               />
             ) : (
-              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-stone-200 bg-stone-100 text-xs font-semibold text-stone-500">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full border border-white/80 bg-white/85 text-xs font-semibold text-stone-500 shadow-[0_10px_18px_-14px_rgba(15,23,42,0.55)]">
                 {(user.displayName ?? "U").slice(0, 1)}
               </div>
             )}
             <button
               type="button"
               onClick={() => void handleLogout()}
-              className="rounded-full bg-stone-100 px-3 py-2 text-xs font-semibold text-stone-600 transition duration-200 active:scale-95 hover:bg-stone-200"
+              className="rounded-full bg-white/85 px-3 py-1.5 text-xs font-semibold text-stone-600 shadow-[0_10px_20px_-16px_rgba(15,23,42,0.45)] transition duration-200 active:scale-95 hover:bg-white"
             >
               로그아웃
             </button>
