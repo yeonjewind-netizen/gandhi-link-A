@@ -565,37 +565,6 @@ export default function PlannerPage() {
     },
     [todayKey]
   );
-  const onUpsertChunkingSubtask = useCallback(
-    (goalIndex: number, slotIndex: number, text: string) => {
-      updateShared((prev) => {
-        const current = prev.byDate[todayKey]?.big3 ?? createDefaultBig3();
-        return {
-          ...prev,
-          byDate: {
-            ...prev.byDate,
-            [todayKey]: {
-              big3: current.map((goal, index) => {
-                if (index !== goalIndex) return goal;
-                const nextSubtasks = [...goal.subTasks];
-                if (nextSubtasks[slotIndex]) {
-                  nextSubtasks[slotIndex] = { ...nextSubtasks[slotIndex], text };
-                } else {
-                  nextSubtasks[slotIndex] = {
-                    id: `chunk-${Date.now()}-${slotIndex}`,
-                    text,
-                    isDone: false,
-                  };
-                }
-                return { ...goal, subTasks: nextSubtasks };
-              }),
-            },
-          },
-        };
-      });
-    },
-    [todayKey]
-  );
-
   const onToggleScheduleChecked = useCallback(
     (item: LayeredScheduleItem, nextChecked: boolean) => {
       const itemKey = scheduleInstanceKey(item);
@@ -610,13 +579,13 @@ export default function PlannerPage() {
   );
 
   return (
-    <section className="mb-6 rounded-3xl bg-white/85 p-7 shadow-sm ring-1 ring-stone-200/60 sm:p-8">
+    <section className="mb-6 rounded-[24px] bg-white/90 p-5 shadow-[0_24px_55px_-34px_rgba(15,23,42,0.45)] sm:p-6">
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
           <p className="text-sm tracking-wide text-stone-500">Planner</p>
           <h2 className="font-display text-xl font-semibold text-stone-800">My Growth Planner</h2>
         </div>
-        <div className="rounded-2xl bg-sage-light px-4 py-3 text-center">
+        <div className="rounded-[20px] bg-sage-light px-4 py-3 text-center shadow-[0_14px_30px_-24px_rgba(15,23,42,0.35)]">
           <p className="text-xs text-sage-deep">오늘 EP</p>
           <p className="text-lg font-semibold text-sage-deep">{todayEpTotal}</p>
         </div>
@@ -633,21 +602,21 @@ export default function PlannerPage() {
           />
         </div>
       </div>
-      <div className="mb-6 rounded-2xl border border-sage-light/70 bg-sage-light/30 px-4 py-3">
+      <div className="mb-6 rounded-[20px] bg-sage-light/30 px-4 py-3 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.3)]">
         <p className="text-xs font-semibold text-sage-deep">오늘의 기획 팁</p>
         <p className="mt-1 text-sm leading-relaxed text-stone-700">
           큰 목표가 막막하다면 3개의 작은 단계로 쪼개보세요. 작게 시작하는 것이 위대한 성장의 첫걸음입니다.
         </p>
       </div>
 
-      <div className="mb-6 grid grid-cols-3 gap-2 rounded-2xl bg-cream/70 p-2">
+      <div className="mb-6 grid grid-cols-3 gap-2 rounded-[20px] bg-cream/80 p-2 shadow-[0_12px_24px_-20px_rgba(15,23,42,0.25)]">
         {(["month", "week", "day"] as ViewMode[]).map((mode) => (
           <button
             key={mode}
             type="button"
             onClick={() => setViewMode(mode)}
-            className={`rounded-xl px-3 py-2 text-sm font-medium capitalize transition ${
-              viewMode === mode ? "bg-stone-800 text-white" : "text-stone-600 hover:bg-white/80"
+            className={`rounded-full px-3 py-2 text-sm font-medium capitalize transition duration-200 active:scale-[0.97] ${
+              viewMode === mode ? "bg-stone-800 text-white shadow-[0_12px_24px_-18px_rgba(15,23,42,0.5)]" : "text-stone-600 hover:bg-white/80"
             }`}
           >
             {mode}
@@ -656,7 +625,7 @@ export default function PlannerPage() {
       </div>
 
       {nearestDdayBanner ? (
-        <div className="sticky top-0 z-20 mb-4 rounded-2xl border border-emerald-200/80 bg-emerald-100/95 px-4 py-2.5 text-center text-sm font-semibold text-emerald-950 shadow-sm backdrop-blur-sm">
+        <div className="sticky top-0 z-20 mb-4 rounded-[20px] bg-emerald-100/95 px-4 py-2.5 text-center text-sm font-semibold text-emerald-950 shadow-[0_12px_26px_-20px_rgba(16,185,129,0.45)] backdrop-blur-sm">
           {nearestDdayBanner}
         </div>
       ) : null}
@@ -718,7 +687,6 @@ export default function PlannerPage() {
           onAppendSubtask={onAppendSubtask}
           onToggleSubtask={onToggleSubtask}
           onDeleteSubtask={onDeleteSubtask}
-          onUpsertChunkingSubtask={onUpsertChunkingSubtask}
           missionEnabled={missionEnabled}
           setMissionEnabled={setMissionEnabled}
           missionTime={missionTime}
@@ -730,7 +698,7 @@ export default function PlannerPage() {
         <GrowthLogChart title="최근 7일 실행 발자국" items={recentGrowthLog} />
       </div>
 
-      <div className="mt-6 rounded-2xl border border-sage-light/70 bg-sage-light/20 p-4">
+      <div className="mt-6 rounded-[20px] bg-sage-light/20 p-4 shadow-[0_16px_32px_-24px_rgba(15,23,42,0.3)]">
         <p className="text-sm font-semibold text-sage-deep">오늘의 성찰과 연대</p>
         <p className="mt-1 text-xs text-stone-500">
           오늘 마주한 한계는 무엇이었나요? 누구와 마음을 나누었나요?
@@ -739,7 +707,7 @@ export default function PlannerPage() {
           value={reflectionMap[todayKey] ?? ""}
           onChange={(event) => updateReflection(todayKey, event.target.value)}
           rows={4}
-          className="mt-3 w-full rounded-xl border border-sage-light bg-white px-3 py-2 text-sm text-stone-700 placeholder:text-stone-400"
+          className="mt-3 w-full rounded-2xl border border-sage-light/60 bg-white px-3 py-2 text-sm text-stone-700 placeholder:text-stone-400 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)] transition focus:border-sage-deep/40 focus:outline-none"
           placeholder="짧게라도 괜찮아요. 오늘의 마음을 남겨보세요."
         />
       </div>

@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { differenceInCalendarDays, subDays } from "date-fns";
+import { onAuthStateChanged, signInWithPopup, signOut, type User } from "firebase/auth";
+import { getToken } from "firebase/messaging";
+import { doc, setDoc } from "firebase/firestore";
 import PlannerPage from "../PlannerPage";
 import { GANDHI_GOALS_KEY, SHARED_STORAGE_KEY } from "../constants";
 import { setDailyBonusForDate, setDailyEpForDate, updateDailyRoutines, updateShared, useGandhiStore } from "../hooks/useGandhiStore";
+import { auth, db, googleProvider, messaging } from "../firebase";
 import { HOME_STORAGE_KEY, ROUTINE_EP_EACH } from "./constants";
 import { ForestTab } from "./ForestTab";
+import { RankingTab } from "./RankingTab";
 import {
   computeBig3DailyEp,
   countBonusGoalsToday,
@@ -19,7 +24,8 @@ const STREAK_COUNT_KEY = "streakCount";
 const LAST_COMPLETED_DATE_KEY = "lastCompletedDate";
 const TOTAL_POINTS_KEY = "totalPoints";
 const NOTIFICATION_ENABLED_KEY = "isNotificationEnabled";
-const LAST_SMART_REMINDER_MINUTE_KEY = "lastSmartReminderMinute";
+const LAST_SMART_REMINDER_SLOT_KEY = "lastSmartReminderSlot";
+const FCM_VAPID_KEY = "BETBdxYWZgnbQO13C17G_-Gax7zbCLKMKME4sxHpMa-AYwd-bPPtWDGqEl6kcW4IUUtTAvSTUEUyoI52RnsRCW8";
 const POINTS_PER_COMPLETED_SUBTASK = 100;
 
 type StreakState = {
@@ -99,6 +105,30 @@ function readIncompleteSubtaskTextsFromStorage(todayDateKey: string) {
   }
 }
 
+function readSubtaskProgressFromStorage(todayDateKey: string) {
+  if (typeof window === "undefined") {
+    return { doneSubtasks: 0, totalSubtasks: 0 };
+  }
+  const sharedRaw = localStorage.getItem(GANDHI_GOALS_KEY) ?? localStorage.getItem(SHARED_STORAGE_KEY);
+  if (!sharedRaw) return { doneSubtasks: 0, totalSubtasks: 0 };
+
+  try {
+    const parsed = JSON.parse(sharedRaw) as { byDate?: Record<string, { big3?: BigGoal[] }> };
+    const todayBig3 = normalizeBig3(parsed?.byDate?.[todayDateKey]?.big3);
+    const totalSubtasks = todayBig3.reduce(
+      (sum, goal) => sum + goal.subTasks.filter((task) => task.text.trim().length > 0).length,
+      0
+    );
+    const doneSubtasks = todayBig3.reduce(
+      (sum, goal) => sum + goal.subTasks.filter((task) => task.text.trim().length > 0 && task.isDone).length,
+      0
+    );
+    return { doneSubtasks, totalSubtasks };
+  } catch {
+    return { doneSubtasks: 0, totalSubtasks: 0 };
+  }
+}
+
 function countCompletedSubtasks(goals: BigGoal[]) {
   return goals.reduce(
     (sum, goal) => sum + goal.subTasks.filter((task) => task.text.trim().length > 0 && task.isDone).length,
@@ -109,13 +139,13 @@ function countCompletedSubtasks(goals: BigGoal[]) {
 export default function App() {
   const todayKey = getDateKey();
   const { shared, dailyRoutines, dailyEpMap } = useGandhiStore();
-  const [activeTab, setActiveTab] = useState<"home" | "planner" | "forest">(() => {
+  const [activeTab, setActiveTab] = useState<"home" | "planner" | "forest" | "ranking">(() => {
     if (typeof window === "undefined") return "home";
     try {
       const raw = localStorage.getItem(HOME_STORAGE_KEY);
       if (!raw) return "home";
       const savedTab = JSON.parse(raw).activeTab;
-      return savedTab === "planner" || savedTab === "forest" ? savedTab : "home";
+      return savedTab === "planner" || savedTab === "forest" || savedTab === "ranking" ? savedTab : "home";
     } catch {
       return "home";
     }
@@ -129,6 +159,9 @@ export default function App() {
     if (typeof window === "undefined" || !("Notification" in window)) return "default";
     return Notification.permission;
   });
+  const [user, setUser] = useState<User | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [authError, setAuthError] = useState("");
   const [showGrowthCelebration, setShowGrowthCelebration] = useState(false);
   const [celebrationStreakCount, setCelebrationStreakCount] = useState(streak.count);
   const isAwardingStreakRef = useRef(false);
@@ -141,6 +174,14 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(NOTIFICATION_ENABLED_KEY, String(isNotificationEnabled));
   }, [isNotificationEnabled]);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (nextUser) => {
+      setUser(nextUser);
+      setIsAuthLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
   const big3 = normalizeBig3(shared.byDate[todayKey]?.big3);
   const big3Ep = useMemo(() => computeBig3DailyEp(big3), [big3]);
@@ -169,6 +210,76 @@ export default function App() {
     setDailyEpForDate(todayKey, totalDailyEp);
     setDailyBonusForDate(todayKey, countBonusGoalsToday(big3));
   }, [todayKey, totalDailyEp, big3]);
+
+  useEffect(() => {
+    if (!user) return;
+    void setDoc(
+      doc(db, "users", user.uid),
+      {
+        uid: user.uid,
+        name: user.displayName ?? "이름 없음",
+        points: totalPoints,
+        photoURL: user.photoURL ?? "",
+        email: user.email ?? "",
+      },
+      { merge: true }
+    );
+  }, [user, totalPoints]);
+
+  const fcmRequestedUidRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    if (typeof window === "undefined") return;
+    if (!("Notification" in window)) return;
+    if (fcmRequestedUidRef.current === user.uid) return;
+    if (!("serviceWorker" in navigator)) return;
+
+    const run = async () => {
+      try {
+        const permission =
+          Notification.permission === "granted" ? "granted" : await Notification.requestPermission();
+        if (permission !== "granted") return;
+
+        // Service Worker 등록 후 토큰 발급
+        const swReg = await navigator.serviceWorker.register("/firebase-messaging-sw.js");
+
+        const token = await getToken(messaging, {
+          vapidKey: FCM_VAPID_KEY,
+          serviceWorkerRegistration: swReg,
+        });
+
+        console.log("[FCM] token:", token);
+
+        if (token) {
+          await setDoc(doc(db, "users", user.uid), { fcmToken: token }, { merge: true });
+        }
+      } catch (e) {
+        console.error("[FCM] failed to get token", e);
+      } finally {
+        fcmRequestedUidRef.current = user.uid;
+      }
+    };
+
+    void run();
+  }, [user]);
+
+  const handleGoogleLogin = useCallback(async () => {
+    try {
+      setAuthError("");
+      await signInWithPopup(auth, googleProvider);
+    } catch {
+      setAuthError("구글 로그인에 실패했어요. 다시 시도해주세요.");
+    }
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    try {
+      await signOut(auth);
+    } catch {
+      setAuthError("로그아웃에 실패했어요. 잠시 후 다시 시도해주세요.");
+    }
+  }, []);
 
   const plantStage = useMemo(() => getPlantStageFromDailyEp(totalDailyEp), [totalDailyEp]);
 
@@ -212,25 +323,6 @@ export default function App() {
       }));
   }
 
-  const appendSubtask = useCallback(
-    (goalIndex: number, text: string) => {
-      updateShared((prevGoals) => {
-        const currentGoals = normalizeBig3(prevGoals.byDate[todayKey]?.big3);
-        const updatedGoals = [...currentGoals];
-        updatedGoals[goalIndex] = {
-          ...updatedGoals[goalIndex],
-          subTasks: [...updatedGoals[goalIndex].subTasks, { id: Date.now(), text, isDone: false }],
-        };
-        const nextState = {
-          ...prevGoals,
-          byDate: { ...prevGoals.byDate, [todayKey]: { big3: updatedGoals } },
-        };
-        return nextState;
-      });
-    },
-    [todayKey]
-  );
-
   const setDailyRoutinesState: Dispatch<SetStateAction<DailyRoutine[]>> = useCallback((next) => {
     updateDailyRoutines((prev) => (typeof next === "function" ? next(prev) : next));
   }, []);
@@ -270,31 +362,30 @@ export default function App() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const scheduledReminderHours = [13, 18, 21];
+    let timeoutId: number | undefined;
 
-    const scheduledReminderTimes = ["13:00", "18:00", "21:00"];
-    const checkAndSendSmartReminder = () => {
+    const notifyIfNeededForSlot = (slotDate: Date, slotHour: number) => {
       if (!isNotificationEnabled) return;
       if (!("Notification" in window) || Notification.permission !== "granted") return;
 
-      const now = new Date();
-      const currentTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-      const currentMinuteKey = `${getDateKey(now)}-${currentTime}`;
-      if (localStorage.getItem(LAST_SMART_REMINDER_MINUTE_KEY) === currentMinuteKey) return;
-      localStorage.setItem(LAST_SMART_REMINDER_MINUTE_KEY, currentMinuteKey);
+      const dateKey = getDateKey(slotDate);
+      const reminderSlotKey = `${dateKey}-${String(slotHour).padStart(2, "0")}`;
+      if (localStorage.getItem(LAST_SMART_REMINDER_SLOT_KEY) === reminderSlotKey) return;
 
-      // TODO: 실제 배포 시에는 특정 시간(예: 1시간 간격)에만 울리도록 수정
-      const shouldNotifyNow = true || scheduledReminderTimes.includes(currentTime);
-      if (!shouldNotifyNow) return;
+      const { doneSubtasks, totalSubtasks } = readSubtaskProgressFromStorage(dateKey);
+      const isProgressComplete = totalSubtasks > 0 && doneSubtasks === totalSubtasks;
+      if (isProgressComplete) return;
 
-      const incompleteSubtaskTexts = readIncompleteSubtaskTextsFromStorage(getDateKey(now));
+      const incompleteSubtaskTexts = readIncompleteSubtaskTextsFromStorage(dateKey);
       if (incompleteSubtaskTexts.length === 0) return;
 
-      const randomIncompleteSubtask =
-        incompleteSubtaskTexts[Math.floor(Math.random() * incompleteSubtaskTexts.length)];
+      localStorage.setItem(LAST_SMART_REMINDER_SLOT_KEY, reminderSlotKey);
+      const randomIncompleteSubtask = incompleteSubtaskTexts[Math.floor(Math.random() * incompleteSubtaskTexts.length)];
       const smartMessages = [
         "오늘 미션이 아직 남아 있어요!",
         "아직 못 한 미션이 남아 있어요!",
-        `BIG3 목표를 달성하기 위해 [${randomIncompleteSubtask}]를 달성해보세요!`,
+        `[${randomIncompleteSubtask}]를 완료해 오늘 목표를 채워보세요!`,
       ];
       const selectedMessage = smartMessages[Math.floor(Math.random() * smartMessages.length)];
 
@@ -307,9 +398,39 @@ export default function App() {
         });
     };
 
-    checkAndSendSmartReminder();
-    const intervalId = window.setInterval(checkAndSendSmartReminder, 60_000);
-    return () => window.clearInterval(intervalId);
+    const getNextReminderSlot = (now: Date) => {
+      for (const hour of scheduledReminderHours) {
+        const candidate = new Date(now);
+        candidate.setHours(hour, 0, 0, 0);
+        if (candidate.getTime() > now.getTime()) {
+          return { slotDate: candidate, slotHour: hour };
+        }
+      }
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(scheduledReminderHours[0], 0, 0, 0);
+      return { slotDate: tomorrow, slotHour: scheduledReminderHours[0] };
+    };
+
+    const scheduleNextReminder = () => {
+      const now = new Date();
+      const { slotDate, slotHour } = getNextReminderSlot(now);
+      const delayMs = Math.max(0, slotDate.getTime() - now.getTime());
+      timeoutId = window.setTimeout(() => {
+        notifyIfNeededForSlot(slotDate, slotHour);
+        scheduleNextReminder();
+      }, delayMs);
+    };
+
+    const now = new Date();
+    if (scheduledReminderHours.includes(now.getHours()) && now.getMinutes() === 0) {
+      notifyIfNeededForSlot(now, now.getHours());
+    }
+    scheduleNextReminder();
+
+    return () => {
+      if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
   }, [isNotificationEnabled, sendNotification]);
 
   const awardStreakForToday = useCallback(() => {
@@ -350,10 +471,37 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [awardStreakForToday, subtaskStats.done, subtaskStats.total]);
 
+  if (isAuthLoading) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-[#FAF7F2] px-4">
+        <p className="text-sm font-medium text-stone-500">로그인 상태를 확인하는 중...</p>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-[#FAF7F2] px-4">
+        <div className="w-full max-w-sm rounded-[28px] bg-white p-8 text-center shadow-[0_20px_50px_-30px_rgba(15,23,42,0.4)]">
+          <p className="text-xs font-semibold uppercase tracking-wide text-sage-deep">Gandhi Link</p>
+          <h1 className="mt-2 text-2xl font-bold text-stone-800">성장을 시작해볼까요?</h1>
+          <button
+            type="button"
+            onClick={() => void handleGoogleLogin()}
+            className="mt-6 w-full rounded-full bg-sage-deep px-4 py-4 text-base font-semibold text-white transition duration-200 active:scale-[0.98] hover:bg-sage-deep/90"
+          >
+            구글로 시작하기
+          </button>
+          {authError ? <p className="mt-3 text-sm text-red-600">{authError}</p> : null}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-dvh bg-[#FAF7F2] pb-28">
-      <div className="mx-auto flex min-h-dvh max-w-md flex-col px-6 pt-10 pb-8 sm:px-8 sm:pt-12">
-        <header className="sticky top-3 z-40 mb-5 flex items-center justify-between rounded-3xl border border-sage-light/70 bg-white/95 px-4 py-3 shadow-sm backdrop-blur">
+      <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col px-4 pt-8 pb-8 sm:px-5 sm:pt-10">
+        <header className="sticky top-2 z-40 mb-5 flex items-center justify-between rounded-[24px] bg-white/90 px-4 py-3 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.45)] backdrop-blur-xl">
           <div>
             <p className="text-xs font-medium text-stone-500">Gandhi Link</p>
             <p className="text-sm font-semibold text-stone-800">오늘도 작은 한 걸음</p>
@@ -373,10 +521,29 @@ export default function App() {
             <button
               type="button"
               onClick={() => setIsSettingsOpen(true)}
-              className="rounded-2xl bg-stone-100 px-3 py-2 text-lg text-stone-500 transition hover:bg-sage-light/60 hover:text-sage-deep"
+              className="rounded-full bg-stone-100 px-3 py-2 text-lg text-stone-500 transition duration-200 active:scale-95 hover:bg-sage-light/60 hover:text-sage-deep"
               aria-label="설정 열기"
             >
               ⚙️
+            </button>
+            {user.photoURL ? (
+              <img
+                src={user.photoURL}
+                alt="프로필"
+                className="h-9 w-9 rounded-full border border-stone-200 object-cover"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div className="flex h-9 w-9 items-center justify-center rounded-full border border-stone-200 bg-stone-100 text-xs font-semibold text-stone-500">
+                {(user.displayName ?? "U").slice(0, 1)}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => void handleLogout()}
+              className="rounded-full bg-stone-100 px-3 py-2 text-xs font-semibold text-stone-600 transition duration-200 active:scale-95 hover:bg-stone-200"
+            >
+              로그아웃
             </button>
           </div>
         </header>
@@ -389,7 +556,6 @@ export default function App() {
             onDayClose={() => setShowDayCloseModal(true)}
             big3={big3}
             setTodayBig3={setTodayBig3}
-            appendSubtask={appendSubtask}
             dailyRoutines={dailyRoutines}
             setDailyRoutines={setDailyRoutinesState}
             showDayCloseModal={showDayCloseModal}
@@ -399,24 +565,27 @@ export default function App() {
           />
         ) : activeTab === "planner" ? (
           <PlannerPage />
+        ) : activeTab === "ranking" ? (
+          <RankingTab />
         ) : (
           <ForestTab growthEnergyPercent={growthEnergyPercent} streakCount={streak.count} totalPoints={totalPoints} />
         )}
       </div>
 
-      <nav className="fixed bottom-0 left-0 right-0 border-t border-stone-200/70 bg-[#FAF7F2]/95 px-6 py-4 backdrop-blur-md sm:px-10">
-        <div className="mx-auto flex max-w-md justify-between gap-2">
+      <nav className="fixed bottom-0 left-0 right-0 z-50 bg-[#FAF7F2]/70 px-4 py-4 shadow-[0_-18px_36px_-24px_rgba(15,23,42,0.35)] backdrop-blur-xl sm:px-5">
+        <div className="mx-auto flex w-full max-w-2xl justify-between gap-2 rounded-[22px] bg-white/85 p-2 shadow-[0_14px_30px_-22px_rgba(15,23,42,0.35)]">
           {[
             { icon: "⌂", label: "Home", value: "home" as const },
             { icon: "▦", label: "Planner", value: "planner" as const },
             { icon: "🌳", label: "Forest", value: "forest" as const },
+            { icon: "🏆", label: "Ranking", value: "ranking" as const },
           ].map((item) => (
             <button
               key={item.label}
               type="button"
               onClick={() => setActiveTab(item.value)}
-              className={`flex flex-1 flex-col items-center gap-2 rounded-2xl py-3 text-xs transition ${
-                activeTab === item.value ? "text-sage-deep" : "text-stone-400 hover:text-stone-600"
+              className={`flex flex-1 flex-col items-center gap-2 rounded-2xl py-3 text-xs transition duration-200 active:scale-[0.97] ${
+                activeTab === item.value ? "bg-sage-light/60 text-sage-deep" : "text-stone-400 hover:bg-stone-100/70 hover:text-stone-600"
               }`}
             >
               <span className="text-lg" aria-hidden>
@@ -430,7 +599,7 @@ export default function App() {
 
       {isSettingsOpen && (
         <div className="fixed inset-0 z-[70] flex items-end justify-center bg-stone-900/35 p-6 backdrop-blur-sm sm:items-center">
-          <div className="w-full max-w-md rounded-3xl border border-sage-light/70 bg-[#FAF7F2] p-6 shadow-2xl">
+          <div className="w-full max-w-md rounded-[28px] bg-[#FAF7F2] p-6 shadow-[0_24px_60px_-28px_rgba(15,23,42,0.55)]">
             <div className="mb-5 flex items-start justify-between gap-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-wide text-sage-deep">Settings</p>
@@ -442,7 +611,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setIsSettingsOpen(false)}
-                className="rounded-full bg-white px-3 py-1.5 text-sm text-stone-500 ring-1 ring-stone-200"
+                className="rounded-full bg-white px-3 py-1.5 text-sm text-stone-500 ring-1 ring-stone-200 transition duration-200 active:scale-95"
               >
                 닫기
               </button>
@@ -463,7 +632,7 @@ export default function App() {
                     }
                     void requestNotificationPermission();
                   }}
-                  className={`w-full rounded-2xl px-4 py-3 text-sm font-semibold transition ${
+                  className={`w-full rounded-full px-4 py-3 text-sm font-semibold transition duration-200 active:scale-[0.98] ${
                     isNotificationEnabled
                       ? "bg-sage-deep text-white"
                       : "bg-white text-sage-deep ring-1 ring-sage-light hover:bg-sage-light/40"
@@ -476,7 +645,7 @@ export default function App() {
                   type="button"
                   disabled={!isNotificationEnabled || notificationPermission !== "granted"}
                   onClick={() => void sendTestNotification()}
-                  className="w-full rounded-2xl bg-orange-100 px-4 py-3 text-sm font-semibold text-orange-700 transition enabled:hover:bg-orange-200 disabled:cursor-not-allowed disabled:opacity-45"
+                  className="w-full rounded-full bg-orange-100 px-4 py-3 text-sm font-semibold text-orange-700 transition duration-200 enabled:active:scale-[0.98] enabled:hover:bg-orange-200 disabled:cursor-not-allowed disabled:opacity-45"
                 >
                   테스트 알림 보내기
                 </button>

@@ -40,7 +40,7 @@ export function DayCloseModal({
           </p>
         ) : (
           <p className="mt-4 text-center text-sm leading-relaxed text-stone-600">
-            아직 오늘의 실행 목표가 비어 있어요. Planner에서 Big 3를 채우면, 작은 한 걸음도 에너지가 될 수 있어요.
+            아직 오늘의 실행 목표가 비어 있어요. Planner에서 아침/점심/저녁 목표를 채우면, 작은 한 걸음도 에너지가 될 수 있어요.
           </p>
         )}
         <p className="mt-3 text-center text-xs text-stone-500">

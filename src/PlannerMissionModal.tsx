@@ -25,6 +25,7 @@ export function PlannerMissionModal({
   onComplete,
 }: PlannerMissionModalProps) {
   if (!isOpen) return null;
+  const goalLabels = ["🌅 아침 목표", "☀️ 점심 목표", "🌙 저녁 목표"] as const;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/30 px-6">
@@ -42,7 +43,7 @@ export function PlannerMissionModal({
           </>
         ) : (
           <>
-            <h3 className="text-center text-xl font-semibold text-stone-800">오늘의 Big 3 설정</h3>
+            <h3 className="text-center text-xl font-semibold text-stone-800">오늘의 아침/점심/저녁 목표 설정</h3>
             <p className="mt-2 text-center text-xs text-stone-500">남은 시간 00:{String(remainingSeconds).padStart(2, "0")}</p>
             {missionBigThree.map((title, idx) => (
               <input
@@ -51,7 +52,7 @@ export function PlannerMissionModal({
                 onChange={(e) =>
                   setMissionBigThree((prev) => prev.map((item, i) => (i === idx ? e.target.value : item)))
                 }
-                placeholder={`Big 3 #${idx + 1} 목표`}
+                placeholder={goalLabels[idx] ?? `목표 ${idx + 1}`}
                 className="mt-3 w-full rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-stone-700"
               />
             ))}

@@ -17,7 +17,6 @@ export type HomeTabProps = {
   onDayClose: () => void;
   big3: BigGoal[];
   setTodayBig3: (next: BigGoal[]) => void;
-  appendSubtask: (goalIndex: number, text: string) => void;
   dailyRoutines: DailyRoutine[];
   setDailyRoutines: Dispatch<SetStateAction<DailyRoutine[]>>;
   showDayCloseModal: boolean;
@@ -34,7 +33,6 @@ export function HomeTab({
   onDayClose,
   big3,
   setTodayBig3,
-  appendSubtask,
   dailyRoutines,
   setDailyRoutines,
   showDayCloseModal,
@@ -53,7 +51,6 @@ export function HomeTab({
         onDayClose={onDayClose}
         big3={big3}
         setTodayBig3={setTodayBig3}
-        appendSubtask={appendSubtask}
       />
       <DailyRoutineSection dailyRoutines={dailyRoutines} setDailyRoutines={setDailyRoutines} />
       <div className="mb-6">

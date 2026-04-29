@@ -15,6 +15,7 @@ import {
   writeWeeklyScheduleStore,
 } from "./scheduleUtils";
 import { PlannerScheduleForm } from "./PlannerScheduleForm";
+import { useGandhiStore } from "./hooks/useGandhiStore";
 import type {
   BaseWeeklyScheduleStore,
   LayeredScheduleItem,
@@ -85,10 +86,11 @@ export function PlannerWeekTab({
   scheduleCheckedForSelectedDay,
   onToggleScheduleChecked,
 }: PlannerWeekTabProps) {
+  const { shared } = useGandhiStore();
   return (
     <div
-      className={`space-y-4 rounded-3xl p-4 ring-1 sm:p-5 ${
-        isMasterMode ? "bg-emerald-50/70 ring-emerald-200/70" : "bg-stone-50 ring-stone-200/60"
+      className={`space-y-4 rounded-[24px] p-4 shadow-[0_20px_46px_-34px_rgba(15,23,42,0.45)] sm:p-5 ${
+        isMasterMode ? "bg-emerald-50/70" : "bg-stone-50/95"
       }`}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -102,22 +104,22 @@ export function PlannerWeekTab({
             setEditingScheduleId(null);
             setIsMasterMode((v) => !v);
           }}
-          className={`rounded-xl border px-3 py-2 text-xs font-semibold shadow-sm transition ${
+          className={`rounded-full px-3 py-2 text-xs font-semibold shadow-sm transition duration-200 active:scale-[0.97] ${
             isMasterMode
-              ? "border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600"
-              : "border-emerald-300/80 bg-emerald-50 text-emerald-900 hover:bg-emerald-100/90"
+              ? "bg-emerald-500 text-white hover:bg-emerald-600"
+              : "bg-emerald-50 text-emerald-900 hover:bg-emerald-100/90"
           }`}
         >
           {isMasterMode ? "✅ 기본 시간표 모드 ON" : "⚙️ 기본 시간표 설정"}
         </button>
       </div>
       {isMasterMode ? (
-        <div className="rounded-2xl border border-emerald-200/80 bg-emerald-100/70 px-3 py-2 text-xs text-emerald-900">
+        <div className="rounded-2xl bg-emerald-100/70 px-3 py-2 text-xs text-emerald-900 shadow-[0_10px_22px_-18px_rgba(16,185,129,0.4)]">
           마스터 모드: 지금 추가/삭제하는 일정은 요일별 고정 시간표로 저장됩니다.
         </div>
       ) : null}
 
-      <div className="w-full overflow-hidden rounded-2xl border border-stone-200/80 bg-white/95 shadow-sm ring-1 ring-stone-100/90">
+      <div className="w-full overflow-hidden rounded-[22px] bg-white/95 shadow-[0_20px_42px_-30px_rgba(15,23,42,0.35)]">
         <div className="border-b border-stone-100 bg-gradient-to-r from-emerald-50/50 to-stone-50/80 px-3 py-2.5 sm:px-4">
           <p className="text-center text-[11px] font-medium text-stone-600 sm:text-left">
             이번 주 한눈에 · 열을 눌러 하루를 선택하세요 (가로 스크롤)
@@ -141,7 +143,7 @@ export function PlannerWeekTab({
                   key={key}
                   type="button"
                   onClick={() => setSelectedWeekDate(new Date(d.getFullYear(), d.getMonth(), d.getDate()))}
-                  className={`min-w-[80px] border-b border-stone-100 py-2.5 text-center transition ${
+                  className={`min-w-[80px] border-b border-stone-100 py-2.5 text-center transition duration-200 active:scale-[0.98] ${
                     isSelected
                       ? "bg-stone-200/90 ring-2 ring-inset ring-emerald-600/35"
                       : isToday
@@ -172,6 +174,10 @@ export function PlannerWeekTab({
                   const weekDayKey = getWeekDayKey(d);
                   const dayBaseSchedules = baseWeeklySchedule[weekDayKey]?.schedules ?? [];
                   const dayWeeklySchedules = weeklySchedule[dateKey]?.schedules ?? [];
+                  const dayBig3 = shared.byDate[dateKey]?.big3;
+                  const mappedGoalIndex =
+                    slot.label === "아침" ? 0 : slot.label === "저녁" ? 2 : 1; // 점심/오후 → 점심 목표
+                  const mappedGoalTitle = (dayBig3?.[mappedGoalIndex]?.title ?? "").trim();
                   const layeredInSlot: LayeredScheduleItem[] = [
                     ...schedulesOverlappingSlot(dayBaseSchedules, slot.start, slot.end).map((item) => ({
                       ...item,
@@ -204,7 +210,22 @@ export function PlannerWeekTab({
                       }`}
                     >
                       {inSlot.length === 0 ? (
-                        <span className="min-h-[2.5rem] flex-1 rounded-md bg-stone-100/70 ring-1 ring-inset ring-stone-200/40" aria-hidden />
+                        mappedGoalTitle ? (
+                          <span
+                            className="min-h-[2.5rem] flex-1 rounded-md bg-stone-100/70 ring-1 ring-inset ring-stone-200/40 px-1.5 py-1"
+                            title={mappedGoalTitle}
+                            aria-hidden
+                          >
+                            <span className="block overflow-hidden text-ellipsis whitespace-nowrap text-[8.5px] font-semibold leading-tight text-stone-700">
+                              {mappedGoalTitle}
+                            </span>
+                          </span>
+                        ) : (
+                          <span
+                            className="min-h-[2.5rem] flex-1 rounded-md bg-stone-100/70 ring-1 ring-inset ring-stone-200/40"
+                            aria-hidden
+                          />
+                        )
                       ) : (
                         <>
                           {visible.map((item) => (
@@ -236,7 +257,7 @@ export function PlannerWeekTab({
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-3xl border border-stone-200/80 bg-white shadow-sm ring-1 ring-stone-100/80">
+      <div className="overflow-hidden rounded-[24px] bg-white shadow-[0_20px_42px_-30px_rgba(15,23,42,0.35)]">
         <div className="border-b border-stone-100 bg-gradient-to-r from-stone-50/90 to-emerald-50/40 px-4 py-3 sm:px-5">
           <p className="text-xs font-medium text-stone-500">선택한 날</p>
           <p className="text-lg font-semibold text-stone-800">
