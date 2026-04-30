@@ -10,7 +10,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'icons.svg', 'pwa-icon.svg', 'pwa-icon-maskable.svg'],
+      includeAssets: ['favicon.svg', 'icons.svg', 'pwa-icon.svg', 'pwa-icon-maskable.svg', 'logo.png'],
       manifest: {
         name: '간디 링크',
         short_name: '간디 링크',
@@ -21,16 +21,16 @@ export default defineConfig({
         start_url: './',
         icons: [
           {
-            src: 'pwa-icon.svg',
-            sizes: 'any',
-            type: 'image/svg+xml',
+            src: '/logo.png',
+            sizes: '192x192',
+            type: 'image/png',
             purpose: 'any',
           },
           {
-            src: 'pwa-icon-maskable.svg',
-            sizes: 'any',
-            type: 'image/svg+xml',
-            purpose: 'maskable',
+            src: '/logo.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'any',
           },
         ],
       },

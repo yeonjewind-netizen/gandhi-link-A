@@ -295,7 +295,7 @@ export default function App() {
   );
   const greetingName = useMemo(() => {
     const baseName = (user?.displayName ?? "").trim();
-    if (!baseName) return "오늘의 러너";
+    if (!baseName) return "연제";
     return baseName.split(" ")[0];
   }, [user]);
   const recentGrowthLog = useMemo(() => {
@@ -517,18 +517,23 @@ export default function App() {
           />
           <div className="relative flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-white/85 text-xl shadow-[0_8px_20px_-14px_rgba(16,185,129,0.55)]"
-                  aria-hidden
-                >
-                  👓🌱
+              <div className="flex items-center gap-3">
+                <span className="inline-flex h-11 w-11 items-center justify-center overflow-hidden rounded-2xl bg-white/90 p-1 shadow-[0_12px_28px_-18px_rgba(16,185,129,0.7)] ring-1 ring-emerald-100/80">
+                  <img src="/logo.png" alt="간디 링크 로고" className="h-full w-full rounded-xl object-cover" />
                 </span>
-                <p className="text-lg font-extrabold tracking-tight text-stone-800">Gandhi Link</p>
+                <div className="min-w-0">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-sage-deep/70">Personal Signboard</p>
+                  <p className="text-lg font-extrabold tracking-tight text-stone-800">Gandhi Link</p>
+                </div>
               </div>
-              <p className="mt-3 text-base font-semibold leading-snug text-sage-deep">
-                {greetingName}님, 오늘도 한 걸음 떼볼까요? 🌱
-              </p>
+              <div className="mt-3 rounded-[32px] border border-white/75 bg-white/70 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.65)] backdrop-blur-sm">
+                <p className="text-base font-semibold leading-snug text-sage-deep">
+                  연제님을 위한 오늘의 인사
+                </p>
+                <p className="mt-1 text-sm font-medium text-stone-600">
+                  {greetingName}님, 새 로고와 함께 오늘의 성장 루틴을 우아하게 시작해볼까요?
+                </p>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <div
